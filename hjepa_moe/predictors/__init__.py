@@ -1,0 +1,1 @@
+from hjepa_moe.predictors.moe_predictor import MoEPredictor

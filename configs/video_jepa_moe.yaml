@@ -1,0 +1,88 @@
+# H-JEPA-MoE: Video prediction on Moving MNIST
+# Single GPU experiment (A100 40GB or smaller)
+# Mirrors EB-JEPA / FAIR style config files
+
+model:
+  level0_mode: "small"
+  d_level0: 256
+  img_size: 64
+  loss_type: "vicreg"   # or "sigreg" for LeJEPA-style
+  sim_coef: 25.0
+  var_coef: 25.0
+  cov_coef: 1.0
+  ema_decay: 0.996
+  n_rollout_steps: 2
+  rollout_weight: 0.5
+
+  levels:
+    # Level 1: fast dynamics (motion at 4-frame scale)
+    - d_in: 256
+      d_out: 256
+      pool_factor: 4
+      n_experts: 4
+      top_k: 2
+      expert_type: "ffn"
+      d_z: 0
+      pooling: "attention"
+      loss_weight: 1.0
+
+    # Level 2: action/interaction scale (16-frame)
+    - d_in: 256
+      d_out: 512
+      pool_factor: 4
+      n_experts: 4
+      top_k: 2
+      expert_type: "transformer"
+      d_z: 32           # latent z enables uncertainty / planning
+      pooling: "attention"
+      loss_weight: 2.0
+
+    # Level 3: semantic / goal scale (64-frame)
+    - d_in: 512
+      d_out: 512
+      pool_factor: 4
+      n_experts: 2
+      top_k: 1
+      expert_type: "transformer"
+      d_z: 64           # larger z for planning horizon
+      pooling: "attention"
+      loss_weight: 4.0
+
+data:
+  dataset: "moving_mnist"     # or "ssv2_small" for video
+  root: "./data"
+  seq_len: 64                  # must be divisible by all pool factors (4^3=64)
+  img_size: 64
+  n_frames_context: 48        # context window (3/4 of seq)
+  batch_size: 64
+
+training:
+  optimizer: "adamw"
+  lr: 3.0e-4
+  weight_decay: 0.05
+  warmup_steps: 1000
+  max_steps: 50000
+  grad_clip: 1.0
+  
+  # Learning rate schedule: cosine with warmup (FAIR standard)
+  lr_schedule: "cosine"
+  min_lr: 1.0e-6
+  
+  # Logging
+  log_every: 100
+  eval_every: 1000
+  save_every: 5000
+
+eval:
+  # Probing on downstream classification
+  probe_type: "linear"    # or "attentive"
+  probe_level: 1          # which JEPA level to probe
+  n_probe_epochs: 20
+
+# Sweep params for ablation
+sweep:
+  param_grid:
+    model.levels[0].n_experts: [2, 4, 8]
+    model.levels[0].top_k: [1, 2]
+    model.loss_type: ["vicreg", "sigreg"]
+    training.lr: [1e-4, 3e-4, 1e-3]
